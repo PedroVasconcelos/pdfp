@@ -1,7 +1,8 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 import pdfplumber
 import pandas as pd
 import pytesseract
@@ -62,6 +63,12 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+# Adicionar middleware de segurança
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=["*"]
 )
 
 # Montar arquivos estáticos
@@ -388,20 +395,29 @@ async def upload_files(files: List[UploadFile] = File(...)):
                 continue
         
         if not processed_files:
-            raise HTTPException(
-                status_code=500,
-                detail="Nenhum arquivo foi processado com sucesso. Verifique se os arquivos são PDFs válidos e contêm texto legível."
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "message": "Nenhum arquivo foi processado com sucesso. Verifique se os arquivos são PDFs válidos e contêm texto legível.",
+                    "processed_files": []
+                }
             )
         
-        return {
-            "message": "Arquivos processados com sucesso",
-            "files": processed_files
-        }
+        return JSONResponse(
+            status_code=200,
+            content={
+                "message": "Arquivos processados com sucesso",
+                "processed_files": processed_files
+            }
+        )
         
     except Exception as e:
         logger.error(f"Erro geral no upload: {str(e)}")
-        raise HTTPException(
+        return JSONResponse(
             status_code=500,
-            detail=f"Erro ao processar arquivos: {str(e)}"
+            content={
+                "message": f"Erro ao processar arquivos: {str(e)}",
+                "processed_files": []
+            }
         )
 

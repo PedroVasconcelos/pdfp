@@ -155,9 +155,17 @@
             // Enviar arquivos
             fetch('/upload/', {
                 method: 'POST',
-                body: formData
+                body: formData,
+                headers: {
+                    'Accept': 'application/json'
+                }
             })
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
             .then(data => {
                 progressBar.style.width = '100%';
                 
@@ -173,6 +181,11 @@
                         fileLink.innerHTML = `<a href="${file}" target="_blank">${file.split('/').pop()}</a>`;
                         resultFiles.appendChild(fileLink);
                     });
+                } else {
+                    const errorDiv = document.createElement('div');
+                    errorDiv.className = 'alert alert-warning';
+                    errorDiv.textContent = data.message || 'Nenhum arquivo foi processado.';
+                    resultFiles.appendChild(errorDiv);
                 }
             })
             .catch(error => {
