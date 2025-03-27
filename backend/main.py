@@ -391,6 +391,8 @@ async def upload_files(files: List[UploadFile] = File(...)):
     processed_files = []
     for file in files:
         try:
+            logger.info(f"Iniciando processamento do arquivo: {file.filename}")
+            
             # Validar o arquivo
             validate_file(file)
             
@@ -406,13 +408,29 @@ async def upload_files(files: List[UploadFile] = File(...)):
             logger.info(f"Arquivo salvo: {file_path}")
             
             # Processar o PDF
-            text = extract_text_from_pdf(file)
+            logger.info("Iniciando extração de texto do PDF")
+            text = await extract_text_from_pdf(file)
+            
+            if not text:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Não foi possível extrair texto do PDF"
+                )
+            
+            logger.info("Iniciando extração de dados do texto")
             dados = extract_data_from_text(text)
+            
+            if not dados["CPF"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Não foi possível extrair dados do PDF. Verifique se o arquivo contém as informações necessárias."
+                )
             
             # Gerar Excel
             excel_filename = f"{os.path.splitext(file.filename)[0]}_processado.xlsx"
             excel_path = os.path.join("uploads", excel_filename)
             
+            logger.info("Gerando arquivo Excel")
             df = pd.DataFrame(dados)
             df.to_excel(excel_path, index=False)
             

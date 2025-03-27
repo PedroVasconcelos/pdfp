@@ -138,7 +138,7 @@
             files.forEach(file => {
                 const fileItem = document.createElement('div');
                 fileItem.className = 'alert alert-info';
-                fileItem.textContent = file.name;
+                fileItem.textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
                 fileList.appendChild(fileItem);
             });
 
@@ -172,31 +172,65 @@
                 progressBar.style.width = '100%';
                 console.log('Resposta do servidor:', data);
                 
-                // Mostrar arquivos processados
-                if (data.processed_files && data.processed_files.length > 0) {
-                    const resultTitle = document.createElement('h5');
-                    resultTitle.textContent = 'Arquivos Processados:';
-                    resultFiles.appendChild(resultTitle);
-
-                    data.processed_files.forEach(file => {
-                        const fileLink = document.createElement('div');
-                        fileLink.className = 'alert alert-success';
-                        fileLink.innerHTML = `<a href="${file}" target="_blank">${file.split('/').pop()}</a>`;
-                        resultFiles.appendChild(fileLink);
+                if (data.message.includes('sucesso')) {
+                    // Criar lista de arquivos processados
+                    const fileList = document.createElement('div');
+                    fileList.className = 'list-group mt-3';
+                    
+                    data.files.forEach(file => {
+                        if (file.status === 'success') {
+                            const item = document.createElement('div');
+                            item.className = 'list-group-item';
+                            item.innerHTML = `
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <h6 class="mb-1">${file.original_name}</h6>
+                                        <small class="text-muted">Processado com sucesso</small>
+                                    </div>
+                                    <a href="/uploads/${file.excel_name}" class="btn btn-success btn-sm" download>
+                                        <i class="fas fa-download"></i> Download Excel
+                                    </a>
+                                </div>
+                            `;
+                            fileList.appendChild(item);
+                        } else {
+                            const item = document.createElement('div');
+                            item.className = 'list-group-item list-group-item-danger';
+                            item.innerHTML = `
+                                <div>
+                                    <h6 class="mb-1">${file.original_name}</h6>
+                                    <small class="text-danger">Erro: ${file.error}</small>
+                                </div>
+                            `;
+                            fileList.appendChild(item);
+                        }
                     });
+                    
+                    resultFiles.innerHTML = `
+                        <div class="alert alert-success">
+                            <i class="fas fa-check-circle"></i> ${data.message}
+                        </div>
+                    `;
+                    resultFiles.appendChild(fileList);
                 } else {
-                    const errorDiv = document.createElement('div');
-                    errorDiv.className = 'alert alert-warning';
-                    errorDiv.textContent = data.message || 'Nenhum arquivo foi processado.';
-                    resultFiles.appendChild(errorDiv);
+                    resultFiles.innerHTML = `
+                        <div class="alert alert-danger">
+                            <i class="fas fa-exclamation-circle"></i> ${data.message}
+                            ${data.details ? `<br><small>Detalhes: ${JSON.stringify(data.details)}</small>` : ''}
+                        </div>
+                    `;
                 }
             })
             .catch(error => {
                 console.error('Erro:', error);
-                const errorDiv = document.createElement('div');
-                errorDiv.className = 'alert alert-danger';
-                errorDiv.textContent = `Erro ao processar os arquivos: ${error.message}`;
-                resultFiles.appendChild(errorDiv);
+                resultFiles.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-circle"></i> Erro ao processar os arquivos: ${error.message}
+                    </div>
+                `;
+            })
+            .finally(() => {
+                progress.style.display = 'none';
             });
         }
 
