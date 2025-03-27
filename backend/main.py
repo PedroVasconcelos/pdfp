@@ -90,14 +90,10 @@ async def read_root():
 def validate_file(file: UploadFile) -> None:
     """
     Valida o arquivo enviado.
-    
-    Args:
-        file: Arquivo a ser validado
-        
-    Raises:
-        HTTPException: Se o arquivo for inválido
     """
     logger.debug(f"Validando arquivo: {file.filename}")
+    
+    # Verificar extensão
     if not file.filename.lower().endswith(tuple(ALLOWED_EXTENSIONS)):
         raise HTTPException(
             status_code=400,
@@ -114,6 +110,7 @@ def validate_file(file: UploadFile) -> None:
             status_code=400,
             detail=f"Arquivo muito grande. Tamanho máximo permitido: {MAX_FILE_SIZE/1024/1024}MB"
         )
+    
     logger.debug(f"Arquivo validado com sucesso. Tamanho: {size/1024/1024:.2f}MB")
 
 def extract_data_from_text(text: str) -> Dict[str, Any]:
@@ -358,6 +355,15 @@ async def upload_files(files: List[UploadFile] = File(...)):
     try:
         logger.info(f"Recebido upload de {len(files)} arquivos")
         processed_files = []
+        
+        if not files:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "message": "Nenhum arquivo foi enviado",
+                    "processed_files": []
+                }
+            )
         
         for file in files:
             try:

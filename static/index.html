@@ -162,12 +162,15 @@
             })
             .then(response => {
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    return response.json().then(data => {
+                        throw new Error(data.message || `HTTP error! status: ${response.status}`);
+                    });
                 }
                 return response.json();
             })
             .then(data => {
                 progressBar.style.width = '100%';
+                console.log('Resposta do servidor:', data);
                 
                 // Mostrar arquivos processados
                 if (data.processed_files && data.processed_files.length > 0) {
@@ -192,7 +195,7 @@
                 console.error('Erro:', error);
                 const errorDiv = document.createElement('div');
                 errorDiv.className = 'alert alert-danger';
-                errorDiv.textContent = 'Erro ao processar os arquivos. Tente novamente.';
+                errorDiv.textContent = `Erro ao processar os arquivos: ${error.message}`;
                 resultFiles.appendChild(errorDiv);
             });
         }
