@@ -41,9 +41,13 @@ TEMP_DIR = "temp"
 
 # Criar diretórios necessários
 for directory in [UPLOAD_DIR, TEMP_DIR]:
-    if not os.path.exists(directory):
-        os.makedirs(directory)
-        logger.info(f"Diretório {directory} criado")
+    try:
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+            logger.info(f"Diretório {directory} criado")
+    except Exception as e:
+        logger.error(f"Erro ao criar diretório {directory}: {str(e)}")
+        # Não vamos falhar aqui, apenas logar o erro
 
 app = FastAPI(
     title="PDF Processor API",
@@ -72,10 +76,15 @@ try:
     logger.info("Diretório static montado com sucesso")
 except Exception as e:
     logger.error(f"Erro ao montar diretório static: {str(e)}")
-    raise
+    # Não vamos falhar aqui, apenas logar o erro
 
 # Montar a pasta uploads para servir os arquivos
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+try:
+    app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+    logger.info("Diretório uploads montado com sucesso")
+except Exception as e:
+    logger.error(f"Erro ao montar diretório uploads: {str(e)}")
+    # Não vamos falhar aqui, apenas logar o erro
 
 @app.get("/")
 async def read_root():
