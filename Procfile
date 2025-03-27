@@ -1,1 +1,1 @@
-web: apt-get update && apt-get install -y tesseract-ocr tesseract-ocr-por poppler-utils libmagic1 && uvicorn backend.main:app --host 0.0.0.0 --port $PORT --workers 1 --timeout-keep-alive 75 --log-level info 
+web: apt-get update && apt-get install -y tesseract-ocr tesseract-ocr-por poppler-utils && uvicorn backend.main:app --host 0.0.0.0 --port $PORT --workers 1 --timeout-keep-alive 75 --log-level info 

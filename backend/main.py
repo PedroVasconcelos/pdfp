@@ -16,7 +16,6 @@ from datetime import datetime
 import tempfile
 import shutil
 import subprocess
-import magic
 
 # Configuração de logging
 logging.basicConfig(
@@ -98,16 +97,15 @@ def validate_file(file: UploadFile) -> None:
     """
     Valida o arquivo enviado.
     """
-    logger.debug(f"Validando arquivo: {file.filename}")
-    
     # Verificar extensão
-    if not file.filename.lower().endswith(tuple(ALLOWED_EXTENSIONS)):
+    file_ext = os.path.splitext(file.filename)[1].lower()
+    if file_ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=400,
-            detail=f"Tipo de arquivo não permitido. Tipos permitidos: {', '.join(ALLOWED_EXTENSIONS)}"
+            detail=f"Tipo de arquivo não permitido. Apenas {', '.join(ALLOWED_EXTENSIONS)} são permitidos."
         )
     
-    # Verificar tamanho do arquivo
+    # Verificar tamanho
     file.file.seek(0, 2)  # Ir para o final do arquivo
     size = file.file.tell()  # Obter posição atual (tamanho)
     file.file.seek(0)  # Voltar para o início
@@ -115,10 +113,18 @@ def validate_file(file: UploadFile) -> None:
     if size > MAX_FILE_SIZE:
         raise HTTPException(
             status_code=400,
-            detail=f"Arquivo muito grande. Tamanho máximo permitido: {MAX_FILE_SIZE/1024/1024}MB"
+            detail=f"Arquivo muito grande. Tamanho máximo permitido: {MAX_FILE_SIZE / 1024 / 1024}MB"
         )
     
-    logger.debug(f"Arquivo validado com sucesso. Tamanho: {size/1024/1024:.2f}MB")
+    # Verificar se é um PDF válido
+    content = file.file.read(4)  # Ler os primeiros 4 bytes
+    file.file.seek(0)  # Voltar para o início
+    
+    if not content.startswith(b'%PDF'):
+        raise HTTPException(
+            status_code=400,
+            detail="O arquivo não é um PDF válido"
+        )
 
 def extract_data_from_text(text: str) -> Dict[str, Any]:
     """
@@ -293,13 +299,6 @@ async def extract_text_from_pdf(pdf_file: UploadFile) -> str:
         # Verificar se o conteúdo é um PDF válido
         if not content.startswith(b'%PDF'):
             logger.error(f"Arquivo não é um PDF válido. Primeiros bytes: {content[:20]}")
-            # Tentar detectar o tipo do arquivo
-            try:
-                file_type = magic.from_buffer(content[:2048])
-                logger.error(f"Tipo do arquivo detectado: {file_type}")
-            except Exception as e:
-                logger.error(f"Erro ao detectar tipo do arquivo: {str(e)}")
-            
             raise HTTPException(
                 status_code=400,
                 detail="O arquivo não é um PDF válido. Verifique se o arquivo está corrompido ou se é realmente um PDF."
