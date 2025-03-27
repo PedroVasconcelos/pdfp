@@ -251,6 +251,7 @@ def extract_data_from_text(text: str) -> Dict[str, Any]:
                 
             else:
                 logger.warning("Não foi possível encontrar nome, matrícula ou CPF no bloco")
+                logger.debug(f"Conteúdo do bloco: {bloco[:200]}...")
                 
         except Exception as e:
             logger.error(f"Erro ao processar funcionário: {str(e)}")
@@ -291,7 +292,15 @@ async def extract_text_from_pdf(pdf_file: UploadFile) -> str:
             logger.info(f"PDF tem {len(pdf.pages)} páginas")
             for i, page in enumerate(pdf.pages, 1):
                 try:
+                    # Tentar extrair texto com diferentes métodos
                     page_text = page.extract_text()
+                    if not page_text:
+                        # Tentar extrair tabelas
+                        tables = page.extract_tables()
+                        if tables:
+                            for table in tables:
+                                page_text += "\n".join(["\t".join(row) for row in table]) + "\n"
+                    
                     if page_text:
                         text += f"\n=== Página {i} ===\n{page_text}\n"
                         logger.info(f"Texto extraído da página {i}")
@@ -318,6 +327,8 @@ async def extract_text_from_pdf(pdf_file: UploadFile) -> str:
                 detail="Não foi possível extrair texto do PDF. Verifique se o arquivo contém texto legível."
             )
         
+        # Log do texto extraído para debug
+        logger.info(f"Texto extraído: {text[:200]}...")
         return text
     except Exception as e:
         logger.error(f"Erro ao processar PDF: {str(e)}")
