@@ -14,6 +14,7 @@ from typing import List, Dict, Any
 from datetime import datetime
 import tempfile
 import shutil
+import subprocess
 
 # Configuração de logging
 logging.basicConfig(
@@ -21,6 +22,14 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Verificar se o Tesseract está instalado
+try:
+    subprocess.run(['tesseract', '--version'], capture_output=True, text=True)
+    logger.info("Tesseract está instalado e funcionando")
+except FileNotFoundError:
+    logger.error("Tesseract não está instalado!")
+    # Não vamos falhar aqui, apenas logar o erro
 
 # Configurações
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
@@ -240,12 +249,6 @@ def extract_data_from_text(text: str) -> Dict[str, Any]:
 async def extract_text_from_pdf(pdf_file: UploadFile) -> str:
     """
     Extrai texto de um arquivo PDF.
-    
-    Args:
-        pdf_file: Arquivo PDF
-        
-    Returns:
-        Texto extraído do PDF
     """
     try:
         content = await pdf_file.read()
@@ -259,29 +262,43 @@ async def extract_text_from_pdf(pdf_file: UploadFile) -> str:
                 page_text = page.extract_text()
                 if page_text:
                     text += f"\n=== Página {i} ===\n{page_text}\n"
+                    logger.info(f"Texto extraído com sucesso da página {i}")
                 else:
                     logger.warning(f"Nenhum texto encontrado na página {i}")
-                    # Tentar OCR
+                    # Tentar OCR apenas se o Tesseract estiver instalado
                     try:
+                        subprocess.run(['tesseract', '--version'], capture_output=True, text=True)
+                        logger.info("Tentando OCR na página...")
                         images = convert_from_bytes(content, first_page=i, last_page=i)
                         for img in images:
-                            page_text = pytesseract.image_to_string(img, lang='por')
-                            if page_text:
-                                text += f"\n=== Página {i} (OCR) ===\n{page_text}\n"
-                                logger.info(f"Texto extraído com OCR da página {i}")
-                            else:
-                                logger.warning(f"Nenhum texto encontrado com OCR na página {i}")
+                            try:
+                                page_text = pytesseract.image_to_string(img, lang='por')
+                                if page_text:
+                                    text += f"\n=== Página {i} (OCR) ===\n{page_text}\n"
+                                    logger.info(f"Texto extraído com OCR da página {i}")
+                                else:
+                                    logger.warning(f"Nenhum texto encontrado com OCR na página {i}")
+                            except Exception as ocr_error:
+                                logger.error(f"Erro no OCR da página {i}: {str(ocr_error)}")
+                    except FileNotFoundError:
+                        logger.error("Tesseract não está instalado, pulando OCR")
                     except Exception as e:
-                        logger.error(f"Erro ao fazer OCR na página {i}: {str(e)}")
+                        logger.error(f"Erro ao tentar OCR na página {i}: {str(e)}")
         
         if not text:
             logger.error("Nenhum texto foi extraído do PDF")
-            raise HTTPException(status_code=400, detail="Não foi possível extrair texto do PDF")
+            raise HTTPException(
+                status_code=400,
+                detail="Não foi possível extrair texto do PDF. Verifique se o arquivo contém texto legível."
+            )
         
         return text
     except Exception as e:
         logger.error(f"Erro ao processar PDF: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Erro ao processar PDF: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao processar PDF: {str(e)}"
+        )
 
 def process_and_generate_excel(text: str, filename: str) -> str:
     """
