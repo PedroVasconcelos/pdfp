@@ -126,6 +126,77 @@ def validate_file(file: UploadFile) -> None:
             detail="O arquivo não é um PDF válido"
         )
 
+async def extract_text_from_pdf(pdf_file: UploadFile) -> str:
+    """
+    Extrai texto de um arquivo PDF.
+    """
+    try:
+        # Ler o conteúdo do arquivo
+        content = await pdf_file.read()
+        text = ""
+        
+        # Criar um arquivo temporário para o PDF
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+            temp_file.write(content)
+            temp_path = temp_file.name
+        
+        try:
+            # Tentar extrair texto diretamente
+            with pdfplumber.open(temp_path) as pdf:
+                logger.info(f"PDF tem {len(pdf.pages)} páginas")
+                for i, page in enumerate(pdf.pages, 1):
+                    try:
+                        # Tentar extrair texto com diferentes métodos
+                        page_text = page.extract_text()
+                        if not page_text:
+                            # Tentar extrair tabelas
+                            tables = page.extract_tables()
+                            if tables:
+                                for table in tables:
+                                    page_text += "\n".join(["\t".join(row) for row in table]) + "\n"
+                        
+                        if page_text:
+                            text += f"\n=== Página {i} ===\n{page_text}\n"
+                            logger.info(f"Texto extraído da página {i}")
+                        else:
+                            logger.warning(f"Nenhum texto encontrado na página {i}")
+                            # Tentar OCR apenas se o Tesseract estiver instalado
+                            try:
+                                images = convert_from_bytes(content, first_page=i, last_page=i)
+                                for img in images:
+                                    page_text = pytesseract.image_to_string(img, lang='por')
+                                    if page_text:
+                                        text += f"\n=== Página {i} (OCR) ===\n{page_text}\n"
+                                        logger.info(f"Texto extraído com OCR da página {i}")
+                            except Exception as e:
+                                logger.error(f"Erro no OCR da página {i}: {str(e)}")
+                    except Exception as page_error:
+                        logger.error(f"Erro ao processar página {i}: {str(page_error)}")
+                        continue
+            
+            if not text:
+                logger.error("Nenhum texto foi extraído do PDF")
+                raise HTTPException(
+                    status_code=400,
+                    detail="Não foi possível extrair texto do PDF. Verifique se o arquivo contém texto legível."
+                )
+            
+            return text
+            
+        finally:
+            # Limpar o arquivo temporário
+            try:
+                os.unlink(temp_path)
+            except Exception as e:
+                logger.error(f"Erro ao remover arquivo temporário: {str(e)}")
+                
+    except Exception as e:
+        logger.error(f"Erro ao processar PDF: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao processar PDF: {str(e)}"
+        )
+
 def extract_data_from_text(text: str) -> Dict[str, Any]:
     """
     Extrai dados relevantes do texto usando expressões regulares.
@@ -283,90 +354,6 @@ def extract_data_from_text(text: str) -> Dict[str, Any]:
     
     logger.info(f"Total de funcionários processados: {len(dados['CPF'])}")
     return dados
-
-async def extract_text_from_pdf(pdf_file: UploadFile) -> str:
-    """
-    Extrai texto de um arquivo PDF.
-    """
-    try:
-        # Ler o conteúdo do arquivo
-        content = await pdf_file.read()
-        text = ""
-        
-        # Log do início do arquivo para debug
-        logger.info(f"Primeiros bytes do arquivo: {content[:20]}")
-        
-        # Verificar se o conteúdo é um PDF válido
-        if not content.startswith(b'%PDF'):
-            logger.error(f"Arquivo não é um PDF válido. Primeiros bytes: {content[:20]}")
-            raise HTTPException(
-                status_code=400,
-                detail="O arquivo não é um PDF válido. Verifique se o arquivo está corrompido ou se é realmente um PDF."
-            )
-        
-        # Criar um arquivo temporário para o PDF
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
-            temp_file.write(content)
-            temp_path = temp_file.name
-        
-        try:
-            # Tentar extrair texto diretamente
-            with pdfplumber.open(temp_path) as pdf:
-                logger.info(f"PDF tem {len(pdf.pages)} páginas")
-                for i, page in enumerate(pdf.pages, 1):
-                    try:
-                        # Tentar extrair texto com diferentes métodos
-                        page_text = page.extract_text()
-                        if not page_text:
-                            # Tentar extrair tabelas
-                            tables = page.extract_tables()
-                            if tables:
-                                for table in tables:
-                                    page_text += "\n".join(["\t".join(row) for row in table]) + "\n"
-                        
-                        if page_text:
-                            text += f"\n=== Página {i} ===\n{page_text}\n"
-                            logger.info(f"Texto extraído da página {i}")
-                        else:
-                            logger.warning(f"Nenhum texto encontrado na página {i}")
-                            # Tentar OCR apenas se o Tesseract estiver instalado
-                            try:
-                                images = convert_from_bytes(content, first_page=i, last_page=i)
-                                for img in images:
-                                    page_text = pytesseract.image_to_string(img, lang='por')
-                                    if page_text:
-                                        text += f"\n=== Página {i} (OCR) ===\n{page_text}\n"
-                                        logger.info(f"Texto extraído com OCR da página {i}")
-                            except Exception as e:
-                                logger.error(f"Erro no OCR da página {i}: {str(e)}")
-                    except Exception as page_error:
-                        logger.error(f"Erro ao processar página {i}: {str(page_error)}")
-                        continue
-            
-            if not text:
-                logger.error("Nenhum texto foi extraído do PDF")
-                raise HTTPException(
-                    status_code=400,
-                    detail="Não foi possível extrair texto do PDF. Verifique se o arquivo contém texto legível."
-                )
-            
-            # Log do texto extraído para debug
-            logger.info(f"Texto extraído: {text[:200]}...")
-            return text
-            
-        finally:
-            # Limpar o arquivo temporário
-            try:
-                os.unlink(temp_path)
-            except Exception as e:
-                logger.error(f"Erro ao remover arquivo temporário: {str(e)}")
-                
-    except Exception as e:
-        logger.error(f"Erro ao processar PDF: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao processar PDF: {str(e)}"
-        )
 
 def process_and_generate_excel(text: str, filename: str) -> str:
     """
