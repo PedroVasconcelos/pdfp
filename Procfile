@@ -1,1 +1,1 @@
-web: docker build -t pdf-processor . && docker run -p $PORT:8000 pdf-processor 
+web: apt-get update && apt-get install -y tesseract-ocr tesseract-ocr-por poppler-utils python3-dev build-essential && uvicorn backend.main:app --host 0.0.0.0 --port $PORT --workers 1 --timeout-keep-alive 75 --log-level info 
