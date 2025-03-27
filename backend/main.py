@@ -17,7 +17,7 @@ import shutil
 
 # Configuração de logging
 logging.basicConfig(
-    level=logging.DEBUG,  # Mudado para DEBUG para ver mais informações
+    level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -29,10 +29,16 @@ UPLOAD_DIR = "uploads"
 TEMP_DIR = "temp"
 
 # Criar diretórios necessários
-for directory in [UPLOAD_DIR, TEMP_DIR]:
-    if not os.path.exists(directory):
-        os.makedirs(directory)
-        logger.info(f"Diretório {directory} criado")
+try:
+    for directory in [UPLOAD_DIR, TEMP_DIR]:
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+            logger.info(f"Diretório {directory} criado")
+        else:
+            logger.info(f"Diretório {directory} já existe")
+except Exception as e:
+    logger.error(f"Erro ao criar diretórios: {str(e)}")
+    raise
 
 app = FastAPI(
     title="PDF Processor API",
@@ -50,11 +56,20 @@ app.add_middleware(
 )
 
 # Montar arquivos estáticos
-app.mount("/static", StaticFiles(directory="static"), name="static")
+try:
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+    logger.info("Diretório static montado com sucesso")
+except Exception as e:
+    logger.error(f"Erro ao montar diretório static: {str(e)}")
+    raise
 
 @app.get("/")
 async def read_root():
-    return FileResponse("static/index.html")
+    try:
+        return FileResponse("static/index.html")
+    except Exception as e:
+        logger.error(f"Erro ao servir index.html: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erro ao carregar página inicial")
 
 def validate_file(file: UploadFile) -> None:
     """
@@ -323,24 +338,44 @@ async def upload_files(files: List[UploadFile] = File(...)):
         for file in files:
             try:
                 logger.info(f"Processando arquivo: {file.filename}")
+                
+                # Validar arquivo
                 validate_file(file)
                 
                 # Extrair texto do PDF
+                logger.debug("Iniciando extração de texto do PDF")
                 text = await extract_text_from_pdf(file)
                 logger.debug(f"Texto extraído: {text[:200]}...")
                 
                 # Processar texto e gerar Excel
+                logger.debug("Iniciando geração do Excel")
                 excel_path = process_and_generate_excel(text, file.filename)
                 processed_files.append(excel_path)
                 logger.info(f"Arquivo processado com sucesso: {excel_path}")
                 
+                # Fechar o arquivo
+                await file.close()
+                
             except Exception as e:
                 logger.error(f"Erro ao processar arquivo {file.filename}: {str(e)}")
-                raise HTTPException(status_code=500, detail=f"Erro ao processar arquivo {file.filename}: {str(e)}")
+                # Não levantar exceção aqui, continuar com os próximos arquivos
+                continue
         
-        return {"message": "Arquivos processados com sucesso", "files": processed_files}
+        if not processed_files:
+            raise HTTPException(
+                status_code=500,
+                detail="Nenhum arquivo foi processado com sucesso"
+            )
+        
+        return {
+            "message": "Arquivos processados com sucesso",
+            "files": processed_files
+        }
         
     except Exception as e:
         logger.error(f"Erro geral no upload: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao processar arquivos: {str(e)}"
+        )
 
