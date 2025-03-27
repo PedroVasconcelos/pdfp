@@ -359,6 +359,15 @@ async def upload_files(files: List[UploadFile] = File(...)):
                 # Validar arquivo
                 validate_file(file)
                 
+                # Verificar se o arquivo é um PDF válido
+                content = await file.read()
+                if not content.startswith(b'%PDF'):
+                    logger.error(f"Arquivo {file.filename} não é um PDF válido")
+                    continue
+                
+                # Voltar o ponteiro do arquivo para o início
+                await file.seek(0)
+                
                 # Extrair texto do PDF
                 logger.debug("Iniciando extração de texto do PDF")
                 text = await extract_text_from_pdf(file)
@@ -381,7 +390,7 @@ async def upload_files(files: List[UploadFile] = File(...)):
         if not processed_files:
             raise HTTPException(
                 status_code=500,
-                detail="Nenhum arquivo foi processado com sucesso"
+                detail="Nenhum arquivo foi processado com sucesso. Verifique se os arquivos são PDFs válidos e contêm texto legível."
             )
         
         return {
