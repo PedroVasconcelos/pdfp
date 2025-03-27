@@ -19,8 +19,8 @@ import subprocess
 
 # Configuração de logging
 logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
@@ -39,16 +39,10 @@ UPLOAD_DIR = "uploads"
 TEMP_DIR = "temp"
 
 # Criar diretórios necessários
-try:
-    for directory in [UPLOAD_DIR, TEMP_DIR]:
-        if not os.path.exists(directory):
-            os.makedirs(directory)
-            logger.info(f"Diretório {directory} criado")
-        else:
-            logger.info(f"Diretório {directory} já existe")
-except Exception as e:
-    logger.error(f"Erro ao criar diretórios: {str(e)}")
-    raise
+for directory in [UPLOAD_DIR, TEMP_DIR]:
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+        logger.info(f"Diretório {directory} criado")
 
 app = FastAPI(
     title="PDF Processor API",
@@ -116,12 +110,6 @@ def validate_file(file: UploadFile) -> None:
 def extract_data_from_text(text: str) -> Dict[str, Any]:
     """
     Extrai dados relevantes do texto usando expressões regulares.
-    
-    Args:
-        text: Texto extraído do PDF
-        
-    Returns:
-        Dict com os dados extraídos
     """
     # Log do texto recebido para debug
     logger.info("Texto recebido do PDF:")
@@ -148,9 +136,11 @@ def extract_data_from_text(text: str) -> Dict[str, Any]:
     lotacao_match = re.search(r'Centro de Custo:\s*\d+\s*-\s*([^-\n]+)', text)
     lotacao_especifica = lotacao_match.group(1).strip() if lotacao_match else ""
     lotacao_completa = f"{lotacao_especifica} - UNCISAL" if lotacao_especifica else "UNCISAL"
+    logger.debug(f"Lotação encontrada: {lotacao_completa}")
     
     # Dividir o texto em blocos por funcionário
     funcionarios = text.split("Nome do Funcionário")
+    logger.info(f"Encontrados {len(funcionarios)-1} funcionários no texto")
     
     for bloco in funcionarios[1:]:  # Ignorar o primeiro split que é o cabeçalho
         try:
@@ -161,28 +151,43 @@ def extract_data_from_text(text: str) -> Dict[str, Any]:
                 nome = nome_match.group(2).strip()
                 cpf = nome_match.group(3)
                 
+                logger.debug(f"Processando funcionário: {nome} (Mat: {matricula}, CPF: {cpf})")
+                
                 dados["NOME"].append(nome)
                 dados["CPF"].append(cpf)
                 
                 # Extrair PIS/NIT
                 pis_match = re.search(r'Código\s*(\d{3}\.\d{5}\.\d{2}-\d)', bloco)
                 if pis_match:
-                    dados["PIS/NIT"].append(pis_match.group(1))
+                    pis = pis_match.group(1)
+                    dados["PIS/NIT"].append(pis)
+                    logger.debug(f"PIS/NIT encontrado: {pis}")
                 else:
                     dados["PIS/NIT"].append("")
+                    logger.debug("PIS/NIT não encontrado")
                 
                 # Extrair data de admissão
                 data_match = re.search(r'Admissão\s+(\d{2}/\d{2}/\d{4})', bloco)
-                dados["DATA DE ADMISSÃO"].append(data_match.group(1) if data_match else "")
+                if data_match:
+                    data = data_match.group(1)
+                    dados["DATA DE ADMISSÃO"].append(data)
+                    logger.debug(f"Data de admissão encontrada: {data}")
+                else:
+                    dados["DATA DE ADMISSÃO"].append("")
+                    logger.debug("Data de admissão não encontrada")
                 
                 # Extrair função
                 funcao_match = re.search(r'Cargo:\s*([A-ZÀ-Ú\s]+?)(?=\s+Estabelecimento:|$|\n)', bloco)
                 if funcao_match:
-                    dados["FUNÇÃO"].append(funcao_match.group(1).strip())
+                    funcao = funcao_match.group(1).strip()
+                    dados["FUNÇÃO"].append(funcao)
+                    logger.debug(f"Função encontrada: {funcao}")
                 else:
                     # Fallback: procurar por qualquer texto entre Cargo: e a próxima palavra-chave
                     funcao_match = re.search(r'Cargo:\s*(.+?)(?=\s+(?:Estabelecimento|Nível|Código|Descontos|$))', bloco)
-                    dados["FUNÇÃO"].append(funcao_match.group(1).strip() if funcao_match else "")
+                    funcao = funcao_match.group(1).strip() if funcao_match else ""
+                    dados["FUNÇÃO"].append(funcao)
+                    logger.debug(f"Função encontrada (fallback): {funcao}")
                 
                 # Adicionar lotação completa
                 dados["LOTAÇÃO"].append(lotacao_completa)
@@ -190,11 +195,15 @@ def extract_data_from_text(text: str) -> Dict[str, Any]:
                 # Extrair carga horária
                 carga_match = re.search(r'Horas Mensais:\s*(\d+)', bloco)
                 if carga_match:
-                    dados["CARGA HORARIA"].append(int(carga_match.group(1)))
+                    carga = int(carga_match.group(1))
+                    dados["CARGA HORARIA"].append(carga)
+                    logger.debug(f"Carga horária encontrada: {carga}")
                 else:
                     # Tentar outro padrão
                     carga_match = re.search(r'Nível:.*?(\d+)\s+Horas', bloco)
-                    dados["CARGA HORARIA"].append(int(carga_match.group(1)) if carga_match else 0)
+                    carga = int(carga_match.group(1)) if carga_match else 0
+                    dados["CARGA HORARIA"].append(carga)
+                    logger.debug(f"Carga horária encontrada (fallback): {carga}")
                 
                 # Calcular valor bruto (soma dos proventos)
                 proventos = []
@@ -205,9 +214,11 @@ def extract_data_from_text(text: str) -> Dict[str, Any]:
                             valor_str = valor_match.group()
                             valor = float(valor_str.replace('.', '').replace(',', '.'))
                             proventos.append(valor)
+                            logger.debug(f"Provento encontrado: {valor_str}")
                 
                 v_bruto = sum(proventos)
                 dados["V. BRUTO"].append(f"{v_bruto:.2f}".replace('.', ','))
+                logger.debug(f"Valor bruto calculado: {v_bruto}")
                 
                 # Extrair INSS (valor após "INSS 11.00")
                 inss_match = re.search(r'INSS\s+11\.00\s+(\d+(?:\.\d+)*,\d{2})', bloco)
@@ -216,8 +227,10 @@ def extract_data_from_text(text: str) -> Dict[str, Any]:
                     inss_str = inss_match.group(1)
                     inss_valor = float(inss_str.replace('.', '').replace(',', '.'))
                     dados["DESCONTO INSS"].append(inss_str)
+                    logger.debug(f"INSS encontrado: {inss_str}")
                 else:
                     dados["DESCONTO INSS"].append("")
+                    logger.debug("INSS não encontrado")
                 
                 # Não usamos mais o Base IRRF como desconto
                 dados["DESCONTO IR"].append("0,00")
@@ -228,10 +241,16 @@ def extract_data_from_text(text: str) -> Dict[str, Any]:
                 # Calcular valor líquido (V. BRUTO - INSS)
                 v_liquido = v_bruto - inss_valor
                 dados["V. LIQUIDO"].append(f"{v_liquido:.2f}".replace('.', ','))
+                logger.debug(f"Valor líquido calculado: {v_liquido}")
                 
                 # Vínculo com PIS/NIT
                 pis = dados["PIS/NIT"][-1]
-                dados["VÍNCULO"].append(f"AUTONOMOS Pis/Pasep: {pis}" if pis else "AUTONOMOS")
+                vinculo = f"AUTONOMOS Pis/Pasep: {pis}" if pis else "AUTONOMOS"
+                dados["VÍNCULO"].append(vinculo)
+                logger.debug(f"Vínculo definido: {vinculo}")
+                
+            else:
+                logger.warning("Não foi possível encontrar nome, matrícula ou CPF no bloco")
                 
         except Exception as e:
             logger.error(f"Erro ao processar funcionário: {str(e)}")
@@ -248,6 +267,7 @@ def extract_data_from_text(text: str) -> Dict[str, Any]:
         while len(dados[campo]) < max_len:
             dados[campo].append("")
     
+    logger.info(f"Total de funcionários processados: {len(dados['CPF'])}")
     return dados
 
 async def extract_text_from_pdf(pdf_file: UploadFile) -> str:
@@ -258,36 +278,38 @@ async def extract_text_from_pdf(pdf_file: UploadFile) -> str:
         content = await pdf_file.read()
         text = ""
         
+        # Verificar se o conteúdo é um PDF válido
+        if not content.startswith(b'%PDF'):
+            logger.error("Arquivo não é um PDF válido")
+            raise HTTPException(
+                status_code=400,
+                detail="O arquivo não é um PDF válido"
+            )
+        
         # Tentar extrair texto diretamente
         with pdfplumber.open(BytesIO(content)) as pdf:
             logger.info(f"PDF tem {len(pdf.pages)} páginas")
             for i, page in enumerate(pdf.pages, 1):
-                logger.info(f"Processando página {i}")
-                page_text = page.extract_text()
-                if page_text:
-                    text += f"\n=== Página {i} ===\n{page_text}\n"
-                    logger.info(f"Texto extraído com sucesso da página {i}")
-                else:
-                    logger.warning(f"Nenhum texto encontrado na página {i}")
-                    # Tentar OCR apenas se o Tesseract estiver instalado
-                    try:
-                        subprocess.run(['tesseract', '--version'], capture_output=True, text=True)
-                        logger.info("Tentando OCR na página...")
-                        images = convert_from_bytes(content, first_page=i, last_page=i)
-                        for img in images:
-                            try:
+                try:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text += f"\n=== Página {i} ===\n{page_text}\n"
+                        logger.info(f"Texto extraído da página {i}")
+                    else:
+                        logger.warning(f"Nenhum texto encontrado na página {i}")
+                        # Tentar OCR apenas se o Tesseract estiver instalado
+                        try:
+                            images = convert_from_bytes(content, first_page=i, last_page=i)
+                            for img in images:
                                 page_text = pytesseract.image_to_string(img, lang='por')
                                 if page_text:
                                     text += f"\n=== Página {i} (OCR) ===\n{page_text}\n"
                                     logger.info(f"Texto extraído com OCR da página {i}")
-                                else:
-                                    logger.warning(f"Nenhum texto encontrado com OCR na página {i}")
-                            except Exception as ocr_error:
-                                logger.error(f"Erro no OCR da página {i}: {str(ocr_error)}")
-                    except FileNotFoundError:
-                        logger.error("Tesseract não está instalado, pulando OCR")
-                    except Exception as e:
-                        logger.error(f"Erro ao tentar OCR na página {i}: {str(e)}")
+                        except Exception as e:
+                            logger.error(f"Erro no OCR da página {i}: {str(e)}")
+                except Exception as page_error:
+                    logger.error(f"Erro ao processar página {i}: {str(page_error)}")
+                    continue
         
         if not text:
             logger.error("Nenhum texto foi extraído do PDF")
