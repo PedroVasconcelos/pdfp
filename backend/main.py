@@ -15,12 +15,9 @@ from datetime import datetime
 import tempfile
 import shutil
 
-# Configurar o caminho do Tesseract
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-
 # Configuração de logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,  # Mudado para DEBUG para ver mais informações
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -35,6 +32,7 @@ TEMP_DIR = "temp"
 for directory in [UPLOAD_DIR, TEMP_DIR]:
     if not os.path.exists(directory):
         os.makedirs(directory)
+        logger.info(f"Diretório {directory} criado")
 
 app = FastAPI(
     title="PDF Processor API",
@@ -68,6 +66,7 @@ def validate_file(file: UploadFile) -> None:
     Raises:
         HTTPException: Se o arquivo for inválido
     """
+    logger.debug(f"Validando arquivo: {file.filename}")
     if not file.filename.lower().endswith(tuple(ALLOWED_EXTENSIONS)):
         raise HTTPException(
             status_code=400,
@@ -84,6 +83,7 @@ def validate_file(file: UploadFile) -> None:
             status_code=400,
             detail=f"Arquivo muito grande. Tamanho máximo permitido: {MAX_FILE_SIZE/1024/1024}MB"
         )
+    logger.debug(f"Arquivo validado com sucesso. Tamanho: {size/1024/1024:.2f}MB")
 
 def extract_data_from_text(text: str) -> Dict[str, Any]:
     """
@@ -246,23 +246,27 @@ async def extract_text_from_pdf(pdf_file: UploadFile) -> str:
                     text += f"\n=== Página {i} ===\n{page_text}\n"
                 else:
                     logger.warning(f"Nenhum texto encontrado na página {i}")
+                    # Tentar OCR
+                    try:
+                        images = convert_from_bytes(content, first_page=i, last_page=i)
+                        for img in images:
+                            page_text = pytesseract.image_to_string(img, lang='por')
+                            if page_text:
+                                text += f"\n=== Página {i} (OCR) ===\n{page_text}\n"
+                                logger.info(f"Texto extraído com OCR da página {i}")
+                            else:
+                                logger.warning(f"Nenhum texto encontrado com OCR na página {i}")
+                    except Exception as e:
+                        logger.error(f"Erro ao fazer OCR na página {i}: {str(e)}")
         
-        # Se não houver texto, tentar OCR
-        if not text.strip():
-            logger.info("Nenhum texto encontrado, tentando OCR...")
-            images = convert_from_bytes(content)
-            for i, img in enumerate(images, 1):
-                logger.info(f"Processando OCR na página {i}")
-                page_text = pytesseract.image_to_string(img, lang="por")
-                text += f"\n=== Página {i} ===\n{page_text}\n"
+        if not text:
+            logger.error("Nenhum texto foi extraído do PDF")
+            raise HTTPException(status_code=400, detail="Não foi possível extrair texto do PDF")
         
         return text
     except Exception as e:
         logger.error(f"Erro ao processar PDF: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao processar PDF: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Erro ao processar PDF: {str(e)}")
 
 def process_and_generate_excel(text: str, filename: str) -> str:
     """
@@ -310,43 +314,33 @@ def process_and_generate_excel(text: str, filename: str) -> str:
 @app.post("/upload/")
 async def upload_files(files: List[UploadFile] = File(...)):
     """
-    Endpoint para upload e processamento de múltiplos arquivos PDF.
-    
-    Args:
-        files: Lista de arquivos PDF
-        
-    Returns:
-        Lista de arquivos Excel processados
+    Endpoint para upload de arquivos PDF.
     """
-    result_files = []
-    temp_files = []
-    
     try:
+        logger.info(f"Recebido upload de {len(files)} arquivos")
+        processed_files = []
+        
         for file in files:
-            # Validar arquivo
-            validate_file(file)
-            
-            # Processar arquivo
-            text = await extract_text_from_pdf(file)
-            excel_file = process_and_generate_excel(text, file.filename)
-            result_files.append(excel_file)
-            
-            # Limpar arquivos temporários
-            if hasattr(file, 'file'):
-                file.file.close()
-    
-    except Exception as e:
-        logger.error(f"Erro no processamento: {str(e)}")
-        # Limpar arquivos em caso de erro
-        for temp_file in temp_files:
             try:
-                os.remove(temp_file)
-            except:
-                pass
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro no processamento: {str(e)}"
-        )
-    
-    return {"processed_files": result_files}
+                logger.info(f"Processando arquivo: {file.filename}")
+                validate_file(file)
+                
+                # Extrair texto do PDF
+                text = await extract_text_from_pdf(file)
+                logger.debug(f"Texto extraído: {text[:200]}...")
+                
+                # Processar texto e gerar Excel
+                excel_path = process_and_generate_excel(text, file.filename)
+                processed_files.append(excel_path)
+                logger.info(f"Arquivo processado com sucesso: {excel_path}")
+                
+            except Exception as e:
+                logger.error(f"Erro ao processar arquivo {file.filename}: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"Erro ao processar arquivo {file.filename}: {str(e)}")
+        
+        return {"message": "Arquivos processados com sucesso", "files": processed_files}
+        
+    except Exception as e:
+        logger.error(f"Erro geral no upload: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
