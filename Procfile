@@ -1,1 +1,1 @@
-web: apt-get update && apt-get install -y tesseract-ocr tesseract-ocr-por && uvicorn backend.main:app --host 0.0.0.0 --port $PORT 
+web: apt-get update && apt-get install -y tesseract-ocr tesseract-ocr-por poppler-utils && uvicorn backend.main:app --host 0.0.0.0 --port $PORT --log-level debug 
