@@ -199,6 +199,92 @@
                 resultFiles.appendChild(errorDiv);
             });
         }
+
+        function handleUpload() {
+            const fileInput = document.getElementById('fileInput');
+            const files = fileInput.files;
+            
+            if (files.length === 0) {
+                alert('Por favor, selecione pelo menos um arquivo PDF.');
+                return;
+            }
+            
+            const formData = new FormData();
+            for (let i = 0; i < files.length; i++) {
+                formData.append('files', files[i]);
+            }
+            
+            // Mostrar loading
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('result').style.display = 'none';
+            
+            fetch('/upload/', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.message.includes('sucesso')) {
+                    // Criar lista de arquivos processados
+                    const fileList = document.createElement('div');
+                    fileList.className = 'list-group mt-3';
+                    
+                    data.files.forEach(file => {
+                        if (file.status === 'success') {
+                            const item = document.createElement('div');
+                            item.className = 'list-group-item';
+                            item.innerHTML = `
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <h6 class="mb-1">${file.original_name}</h6>
+                                        <small class="text-muted">Processado com sucesso</small>
+                                    </div>
+                                    <a href="/uploads/${file.excel_name}" class="btn btn-success btn-sm" download>
+                                        <i class="fas fa-download"></i> Download Excel
+                                    </a>
+                                </div>
+                            `;
+                            fileList.appendChild(item);
+                        } else {
+                            const item = document.createElement('div');
+                            item.className = 'list-group-item list-group-item-danger';
+                            item.innerHTML = `
+                                <div>
+                                    <h6 class="mb-1">${file.original_name}</h6>
+                                    <small class="text-danger">Erro: ${file.error}</small>
+                                </div>
+                            `;
+                            fileList.appendChild(item);
+                        }
+                    });
+                    
+                    document.getElementById('result').innerHTML = `
+                        <div class="alert alert-success">
+                            <i class="fas fa-check-circle"></i> ${data.message}
+                        </div>
+                    `;
+                    document.getElementById('result').appendChild(fileList);
+                } else {
+                    document.getElementById('result').innerHTML = `
+                        <div class="alert alert-danger">
+                            <i class="fas fa-exclamation-circle"></i> ${data.message}
+                        </div>
+                    `;
+                }
+            })
+            .catch(error => {
+                console.error('Erro:', error);
+                document.getElementById('result').innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-circle"></i> Erro ao processar arquivos: ${error.message}
+                    </div>
+                `;
+            })
+            .finally(() => {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('result').style.display = 'block';
+            });
+        }
     </script>
 </body>
 </html> 

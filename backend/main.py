@@ -73,6 +73,9 @@ except Exception as e:
     logger.error(f"Erro ao montar diretório static: {str(e)}")
     raise
 
+# Montar a pasta uploads para servir os arquivos
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
 @app.get("/")
 async def read_root():
     try:
@@ -139,13 +142,13 @@ def extract_data_from_text(text: str) -> Dict[str, Any]:
     logger.debug(f"Lotação encontrada: {lotacao_completa}")
     
     # Dividir o texto em blocos por funcionário
-    funcionarios = text.split("Nome do Funcionário")
+    funcionarios = text.split("Mat.")
     logger.info(f"Encontrados {len(funcionarios)-1} funcionários no texto")
     
     for bloco in funcionarios[1:]:  # Ignorar o primeiro split que é o cabeçalho
         try:
             # Extrair nome e matrícula
-            nome_match = re.search(r'(?:Mat\.)?\s*(\d+)\s+([A-ZÀ-Ú\s]+?)\s+(\d{3}\.\d{3}\.\d{3}-\d{2})', bloco)
+            nome_match = re.search(r'(\d+)\s+([A-ZÀ-Ú\s]+?)\s+(\d{3}\.\d{3}\.\d{3}-\d{2})', bloco)
             if nome_match:
                 matricula = nome_match.group(1)
                 nome = nome_match.group(2).strip()
@@ -157,7 +160,7 @@ def extract_data_from_text(text: str) -> Dict[str, Any]:
                 dados["CPF"].append(cpf)
                 
                 # Extrair PIS/NIT
-                pis_match = re.search(r'Código\s*(\d{3}\.\d{5}\.\d{2}-\d)', bloco)
+                pis_match = re.search(r'Pis/Pasep:\s*(\d{3}\.\d{5}\.\d{2}-\d)', bloco)
                 if pis_match:
                     pis = pis_match.group(1)
                     dados["PIS/NIT"].append(pis)
@@ -183,11 +186,8 @@ def extract_data_from_text(text: str) -> Dict[str, Any]:
                     dados["FUNÇÃO"].append(funcao)
                     logger.debug(f"Função encontrada: {funcao}")
                 else:
-                    # Fallback: procurar por qualquer texto entre Cargo: e a próxima palavra-chave
-                    funcao_match = re.search(r'Cargo:\s*(.+?)(?=\s+(?:Estabelecimento|Nível|Código|Descontos|$))', bloco)
-                    funcao = funcao_match.group(1).strip() if funcao_match else ""
-                    dados["FUNÇÃO"].append(funcao)
-                    logger.debug(f"Função encontrada (fallback): {funcao}")
+                    dados["FUNÇÃO"].append("")
+                    logger.debug("Função não encontrada")
                 
                 # Adicionar lotação completa
                 dados["LOTAÇÃO"].append(lotacao_completa)
@@ -199,11 +199,8 @@ def extract_data_from_text(text: str) -> Dict[str, Any]:
                     dados["CARGA HORARIA"].append(carga)
                     logger.debug(f"Carga horária encontrada: {carga}")
                 else:
-                    # Tentar outro padrão
-                    carga_match = re.search(r'Nível:.*?(\d+)\s+Horas', bloco)
-                    carga = int(carga_match.group(1)) if carga_match else 0
-                    dados["CARGA HORARIA"].append(carga)
-                    logger.debug(f"Carga horária encontrada (fallback): {carga}")
+                    dados["CARGA HORARIA"].append(0)
+                    logger.debug("Carga horária não encontrada")
                 
                 # Calcular valor bruto (soma dos proventos)
                 proventos = []
@@ -385,78 +382,79 @@ async def upload_files(files: List[UploadFile] = File(...)):
     """
     Endpoint para upload de arquivos PDF.
     """
-    try:
-        logger.info(f"Recebido upload de {len(files)} arquivos")
-        processed_files = []
-        
-        if not files:
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "message": "Nenhum arquivo foi enviado",
-                    "processed_files": []
-                }
-            )
-        
-        for file in files:
-            try:
-                logger.info(f"Processando arquivo: {file.filename}")
-                
-                # Validar arquivo
-                validate_file(file)
-                
-                # Verificar se o arquivo é um PDF válido
+    if not files:
+        return JSONResponse(
+            status_code=400,
+            content={"message": "Nenhum arquivo enviado"}
+        )
+    
+    processed_files = []
+    for file in files:
+        try:
+            # Validar o arquivo
+            validate_file(file)
+            
+            # Criar diretório de uploads se não existir
+            os.makedirs("uploads", exist_ok=True)
+            
+            # Salvar o arquivo
+            file_path = os.path.join("uploads", file.filename)
+            with open(file_path, "wb") as buffer:
                 content = await file.read()
-                if not content.startswith(b'%PDF'):
-                    logger.error(f"Arquivo {file.filename} não é um PDF válido")
-                    continue
-                
-                # Voltar o ponteiro do arquivo para o início
-                await file.seek(0)
-                
-                # Extrair texto do PDF
-                logger.debug("Iniciando extração de texto do PDF")
-                text = await extract_text_from_pdf(file)
-                logger.debug(f"Texto extraído: {text[:200]}...")
-                
-                # Processar texto e gerar Excel
-                logger.debug("Iniciando geração do Excel")
-                excel_path = process_and_generate_excel(text, file.filename)
-                processed_files.append(excel_path)
-                logger.info(f"Arquivo processado com sucesso: {excel_path}")
-                
-                # Fechar o arquivo
-                await file.close()
-                
-            except Exception as e:
-                logger.error(f"Erro ao processar arquivo {file.filename}: {str(e)}")
-                # Não levantar exceção aqui, continuar com os próximos arquivos
-                continue
-        
-        if not processed_files:
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "message": "Nenhum arquivo foi processado com sucesso. Verifique se os arquivos são PDFs válidos e contêm texto legível.",
-                    "processed_files": []
-                }
-            )
-        
+                buffer.write(content)
+            
+            logger.info(f"Arquivo salvo: {file_path}")
+            
+            # Processar o PDF
+            text = extract_text_from_pdf(file)
+            dados = extract_data_from_text(text)
+            
+            # Gerar Excel
+            excel_filename = f"{os.path.splitext(file.filename)[0]}_processado.xlsx"
+            excel_path = os.path.join("uploads", excel_filename)
+            
+            df = pd.DataFrame(dados)
+            df.to_excel(excel_path, index=False)
+            
+            processed_files.append({
+                "original_name": file.filename,
+                "excel_name": excel_filename,
+                "status": "success"
+            })
+            
+            logger.info(f"Arquivo Excel gerado: {excel_path}")
+            
+        except Exception as e:
+            logger.error(f"Erro ao processar arquivo {file.filename}: {str(e)}")
+            processed_files.append({
+                "original_name": file.filename,
+                "error": str(e),
+                "status": "error"
+            })
+    
+    if not any(f["status"] == "success" for f in processed_files):
         return JSONResponse(
-            status_code=200,
+            status_code=400,
             content={
-                "message": "Arquivos processados com sucesso",
-                "processed_files": processed_files
+                "message": "Nenhum arquivo processado com sucesso",
+                "details": processed_files
             }
         )
-        
-    except Exception as e:
-        logger.error(f"Erro geral no upload: {str(e)}")
-        return JSONResponse(
-            status_code=500,
-            content={
-                "message": f"Erro ao processar arquivos: {str(e)}",
-                "processed_files": []
-            }
-        )
+    
+    return JSONResponse(
+        content={
+            "message": "Arquivos processados com sucesso",
+            "files": processed_files
+        }
+    )
+
+@app.get("/download/{filename}")
+async def download_file(filename: str):
+    """
+    Endpoint para download de arquivos processados.
+    """
+    file_path = os.path.join("uploads", filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+    return FileResponse(file_path, filename=filename)
 
