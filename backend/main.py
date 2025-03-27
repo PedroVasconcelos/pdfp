@@ -16,6 +16,7 @@ from datetime import datetime
 import tempfile
 import shutil
 import subprocess
+import magic
 
 # Configuração de logging
 logging.basicConfig(
@@ -276,12 +277,22 @@ async def extract_text_from_pdf(pdf_file: UploadFile) -> str:
         content = await pdf_file.read()
         text = ""
         
+        # Log do início do arquivo para debug
+        logger.info(f"Primeiros bytes do arquivo: {content[:20]}")
+        
         # Verificar se o conteúdo é um PDF válido
         if not content.startswith(b'%PDF'):
-            logger.error("Arquivo não é um PDF válido")
+            logger.error(f"Arquivo não é um PDF válido. Primeiros bytes: {content[:20]}")
+            # Tentar detectar o tipo do arquivo
+            try:
+                file_type = magic.from_buffer(content[:2048])
+                logger.error(f"Tipo do arquivo detectado: {file_type}")
+            except Exception as e:
+                logger.error(f"Erro ao detectar tipo do arquivo: {str(e)}")
+            
             raise HTTPException(
                 status_code=400,
-                detail="O arquivo não é um PDF válido"
+                detail="O arquivo não é um PDF válido. Verifique se o arquivo está corrompido ou se é realmente um PDF."
             )
         
         # Tentar extrair texto diretamente
